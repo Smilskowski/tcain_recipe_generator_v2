@@ -3,67 +3,84 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vm from 'vm';
 import * as zlib from 'zlib';
+import { TextDecoder, TextEncoder } from 'util';
 
-function isGzip(buf: Buffer) {
-  return buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+function isGzip(b: Buffer) {
+  return b.length > 2 && b[0] === 0x1f && b[1] === 0x8b;
 }
 
-function maybeDecompress(buf: Buffer): Buffer {
-  if (isGzip(buf)) {
-    return zlib.gunzipSync(buf);
+function tryDecode(raw: Buffer): string {
+  const candidates: Buffer[] = [raw];
+  if (isGzip(raw)) {
+    candidates.push(zlib.gunzipSync(raw));
+  } else {
+    // falls als brotli abgelegt
+    try { candidates.push(zlib.brotliDecompressSync(raw)); } catch {}
   }
-  // optional: brotli fallback, falls nötig
-  try {
-    // Heuristik: wenn viele nicht druckbare Bytes → evtl. brotli
-    const nonPrintable = buf.slice(0, 64).filter(b => b < 9 || (b > 13 && b < 32)).length;
-    if (nonPrintable > 40) {
-      return zlib.brotliDecompressSync(buf);
-    }
-  } catch {}
-  return buf;
-}
-
-function toStringSafe(buf: Buffer): string {
-  // UTF-8 zuerst
-  let s = buf.toString('utf8');
-  // BOM entfernen
-  if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
-  // Falls sehr viele Ersatzzeichen, nochmal latin1 probieren
-  const repl = (s.match(/\uFFFD/g) || []).length;
-  if (repl > 10) {
+  for (const buf of candidates) {
+    // bevorzugt utf8, dann latin1 als Fallback
+    let s = buf.toString('utf8');
+    if (s.includes('get_result') || s.includes('str2seed')) return s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s;
     s = buf.toString('latin1');
+    if (s.includes('get_result') || s.includes('str2seed')) return s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s;
   }
-  return s;
+  // letzte Chance
+  let s = raw.toString('utf8');
+  return s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s;
 }
 
 function loadBag4() {
   const p = path.resolve(process.cwd(), 'docs/new_bag4.js');
   const raw = fs.readFileSync(p);
-  const decompressed = maybeDecompress(raw);
-  const code = toStringSafe(decompressed);
+  const code = tryDecode(raw);
 
-  const sandbox: any = { module: { exports: {} }, exports: {}, window: {}, global: {} };
-  sandbox.global = sandbox.window;
+  // Browser-Polyfills, die new_bag4.js oft erwartet
+  const sandbox: any = {
+    module: { exports: {} },
+    exports: {},
+    window: {},
+    self: {},
+    global: {},
+    globalThis: undefined,
+    console,
+    TextDecoder,
+    TextEncoder,
+    atob: (s: string) => Buffer.from(s, 'base64').toString('binary'),
+    btoa: (s: string) => Buffer.from(s, 'binary').toString('base64'),
+    // Minimal-DOM-Stubs, falls referenziert
+    document: undefined,
+    performance: { now: () => Date.now() },
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
 
   vm.createContext(sandbox);
+
+  // Ausführen; viele Skripte werfen bei fehlenden Polyfills "Error" – das umgehen wir jetzt durch vollständige Stubs
   vm.runInContext(code, sandbox, { filename: 'new_bag4.js' });
 
-  const s2s =
-    sandbox.str2seed ??
-    sandbox.window?.str2seed ??
-    sandbox.global?.str2seed ??
-    sandbox.module?.exports?.str2seed;
+  // mögliche Export-Wege durchprobieren
+  const candidates = [
+    sandbox.module?.exports,
+    sandbox.exports,
+    sandbox,
+    sandbox.window,
+    sandbox.global,
+  ];
 
-  const getRes =
-    sandbox.get_result ??
-    sandbox.window?.get_result ??
-    sandbox.global?.get_result ??
-    sandbox.module?.exports?.get_result;
-
-  if (typeof s2s !== 'function' || typeof getRes !== 'function') {
-    throw new Error('new_bag4.js did not expose str2seed/get_result');
+  let str2seedFn: any, getResultFn: any;
+  for (const c of candidates) {
+    if (!c) continue;
+    if (!str2seedFn && typeof c.str2seed === 'function') str2seedFn = c.str2seed;
+    if (!getResultFn && typeof c.get_result === 'function') getResultFn = c.get_result;
   }
-  return { str2seed: s2s, get_result: getRes };
+
+  if (typeof str2seedFn !== 'function' || typeof getResultFn !== 'function') {
+    throw new Error('new_bag4.js: str2seed/get_result nicht gefunden (Encoding/Polyfill)');
+  }
+  return { str2seed: str2seedFn, get_result: getResultFn };
 }
 
 const _bag4 = loadBag4();
