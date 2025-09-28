@@ -2,6 +2,7 @@ import _ = require('lodash');
 import { ItemPool, ItemQualities } from './Isaac';
 import { Rng } from './Rng';
 import { loadPGBag } from "./vendor/pgLoader";
+const { str2seed, get_result } = require('./pg-bag4');
 
 // Nutzt platinumgod-Logik, fällt sonst auf Legacy zurück
 function computeCraftResult(
