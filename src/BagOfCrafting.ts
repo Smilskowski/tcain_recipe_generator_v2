@@ -54,8 +54,29 @@ export class BagOfCrafting {
   }
 
   calculate(components: number[], seed?: number | string) {
-    if (components == null || components.length !== 8)
-      throw new Error("Invalid components");
+  if (!components || components.length !== 8) {
+    throw new Error('Invalid components');
+  }
+  let rngSeed = 0;
+  if (typeof seed === 'string') {
+    try {
+      rngSeed = str2seed(seed) >>> 0;
+    } catch {
+      // Minimaler Fallback, falls str2seed nicht greift
+      let hash = 0;
+      for (let i = 0; i < seed.length; i++) {
+        const c = seed.charCodeAt(i);
+        hash = ((hash << 5) - hash) + c;
+        hash |= 0;
+      }
+      rngSeed = Math.abs(hash) >>> 0;
+    }
+  } else if (typeof seed === 'number') {
+    rngSeed = seed >>> 0;
+  }
+  return get_result(components, rngSeed);
+}
+
 
     // Legacy-Algorithmus als Closure beibehalten
     const legacyCalc = (): number => {
