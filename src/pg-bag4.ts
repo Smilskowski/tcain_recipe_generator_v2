@@ -1,70 +1,38 @@
 // src/pg-bag4.ts
-import * as https from 'https';
 import * as vm from 'vm';
+import { execFileSync, execSync } from 'child_process';
 
-interface BagAPI {
-  str2seed: (s: string) => number;
-  get_result: (comps: number[], seed: number) => number;
+function fetchScriptSync(url: string): string {
+  try {
+    // 1) curl (Windows 10+ hat curl)
+    const out = execFileSync('curl', ['-sL', url], { encoding: 'utf8' });
+    if (out && out.includes('function') && out.includes('get_result')) return out;
+  } catch {}
+  try {
+    // 2) PowerShell Fallback (ohne curl)
+    const ps = `powershell -NoProfile -ExecutionPolicy Bypass -Command "(New-Object Net.WebClient).DownloadString('${url}')"`;
+    const out = execSync(ps, { encoding: 'utf8' });
+    if (out && out.includes('function') && out.includes('get_result')) return out;
+  } catch {}
+  throw new Error('Konnte new_bag4.js nicht synchron laden (curl/PowerShell fehlt?).');
 }
 
-let cached: BagAPI | null = null;
+const CODE = fetchScriptSync('https://platinumgod.co.uk/bag-of-crafting/new_bag4.js');
 
-/**
- * Lädt die Original‑Bag-of-Crafting‑Logik über HTTPS,
- * evaluiert sie in einer VM und cached die Exporte.
- */
-function loadBagOfCrafting(): Promise<BagAPI> {
-  if (cached) return Promise.resolve(cached);
-  const url = 'https://platinumgod.co.uk/bag-of-crafting/new_bag4.js';
-  return new Promise((resolve, reject) => {
-    https
-      .get(url, res => {
-        let data = '';
-        res.setEncoding('utf8');
-        res.on('data', chunk => (data += chunk));
-        res.on('end', () => {
-          try {
-            const sandbox: any = { module: { exports: {} }, exports: {}, console };
-            vm.createContext(sandbox);
-            vm.runInContext(data, sandbox, { filename: 'new_bag4.js' });
-            const str2seed =
-              sandbox.str2seed ||
-              sandbox.module?.exports?.str2seed ||
-              sandbox.exports?.str2seed;
-            const get_result =
-              sandbox.get_result ||
-              sandbox.module?.exports?.get_result ||
-              sandbox.exports?.get_result;
-            if (typeof str2seed !== 'function' || typeof get_result !== 'function') {
-              reject(
-                new Error(
-                  'new_bag4.js enthält keine str2seed()/get_result()-Funktionen'
-                )
-              );
-              return;
-            }
-            cached = { str2seed, get_result };
-            resolve(cached);
-          } catch (e) {
-            reject(e);
-          }
-        });
-      })
-      .on('error', err => reject(err));
-  });
+const sandbox: any = { module: { exports: {} }, exports: {}, console };
+vm.createContext(sandbox);
+vm.runInContext(CODE, sandbox, { filename: 'new_bag4.js' });
+
+const _str2seed =
+  sandbox.str2seed || sandbox.module?.exports?.str2seed || sandbox.exports?.str2seed;
+const _get_result =
+  sandbox.get_result || sandbox.module?.exports?.get_result || sandbox.exports?.get_result;
+
+if (typeof _str2seed !== 'function' || typeof _get_result !== 'function') {
+  throw new Error('str2seed/get_result nicht gefunden.');
 }
 
-export async function str2seed(s: string): Promise<number> {
-  const api = await loadBagOfCrafting();
-  return api.str2seed(s);
-}
-
-export async function get_result(
-  comps: number[],
-  seed: number
-): Promise<number> {
-  const api = await loadBagOfCrafting();
-  return api.get_result(comps, seed);
-}
+export const str2seed: (s: string) => number = _str2seed;
+export const get_result: (components: number[], seed: number) => number = _get_result;
 
 export default { str2seed, get_result };
