@@ -1,7 +1,7 @@
 // src/index.ts
 import * as fs from 'fs';
 import * as path from 'path';
-import * as xml2js from 'xml2js';
+// import * as xml2js from 'xml2js'; // Optional - only if xml2js is installed
 import _ = require('lodash');
 import BagOfCrafting from './BagOfCrafting';
 import { ItemPool, ItemQualities, CRAFTING_COMPONENTS, validateRecipe } from './Isaac';
