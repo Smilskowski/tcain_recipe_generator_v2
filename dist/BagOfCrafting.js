@@ -3,125 +3,156 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BagOfCrafting = void 0;
 const _ = require("lodash");
 const Rng_1 = require("./Rng");
+const pgLoader_1 = require("./vendor/pgLoader");
+// Nutzt platinumgod-Logik, fällt sonst auf Legacy zurück
+function computeCraftResult(components, seedIn, legacyCalc) {
+    const pg = pgLoader_1.loadPGBag();
+    if (!pg)
+        return legacyCalc();
+    let seedNum;
+    try {
+        if (typeof seedIn === "number") {
+            seedNum = seedIn >>> 0;
+        }
+        else if (typeof seedIn === "string") {
+            seedNum = pg.str2seed(seedIn);
+        }
+        else {
+            seedNum = 0x77777770; // Default wie Legacy
+        }
+        const resultId = pg.get_result(components, seedNum);
+        return (typeof resultId === "number" && !Number.isNaN(resultId)) ? resultId : legacyCalc();
+    }
+    catch (_a) {
+        return legacyCalc();
+    }
+}
 class BagOfCrafting {
     constructor(pools, itemQualities) {
         this.pools = pools;
         this.itemQualities = itemQualities;
         this.maxItemId = _.max(Array.from(this.itemQualities.keys()));
     }
-    // Convert string seed to number (Isaac's seed format)
+    // Legacy: String-Seed-Hash (nur Fallback)
     stringToSeed(seed) {
         let hash = 0;
         for (let i = 0; i < seed.length; i++) {
             const char = seed.charCodeAt(i);
             hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32-bit integer
+            hash = hash & hash; // 32-bit int
         }
-        const result = Math.abs(hash) >>> 0; // Ensure positive 32-bit integer
-        console.log(`Seed "${seed}" converted to: ${result}`);
+        const result = Math.abs(hash) >>> 0;
         return result;
     }
     calculate(components, seed) {
-        // Convert seed to proper format if provided
-        let rngSeed = 0x77777770;
-        if (seed !== undefined) {
-            if (typeof seed === 'string') {
-                // Convert string seed to hash number
-                rngSeed = this.stringToSeed(seed);
-            }
-            else {
-                rngSeed = seed;
-            }
-        }
-        let rng = new Rng_1.Rng(rngSeed, [0, 0, 0]);
-        if (components == null || components.length != 8)
+        if (components == null || components.length !== 8)
             throw new Error("Invalid components");
-        components = _.orderBy(components, e => e);
-        let hardcoded = BagOfCrafting.JsIncorrectRecipes.get(components.toString());
-        if (hardcoded != null)
-            return hardcoded;
-        let compTotalWeight = 0;
-        let compCounts = new Array(BagOfCrafting.ComponentShifts.length).fill(0);
-        for (let compId of components) {
-            ++compCounts[compId];
-            compTotalWeight += BagOfCrafting.ComponentWeights[compId];
-            // Can apply shifts here because components is sorted
-            rng.shift = BagOfCrafting.ComponentShifts[compId];
-            rng.next();
-        }
-        rng.shift = BagOfCrafting.ComponentShifts[6];
-        let poolWeights = [
-            { idx: 0, weight: 1 },
-            { idx: 1, weight: 2 },
-            { idx: 2, weight: 2 },
-            { idx: 4, weight: compCounts[4] * 10 },
-            { idx: 3, weight: compCounts[3] * 10 },
-            { idx: 5, weight: compCounts[6] * 5 },
-            { idx: 8, weight: compCounts[5] * 10 },
-            { idx: 12, weight: compCounts[7] * 10 },
-            { idx: 9, weight: compCounts[25] * 10 },
-        ];
-        if (compCounts[8] + compCounts[1] + compCounts[12] + compCounts[15] == 0)
-            poolWeights.push({ idx: 26, weight: compCounts[23] * 10 });
-        let totalWeight = 0;
-        let itemWeights = new Array(this.maxItemId + 1).fill(0);
-        for (let poolWeight of poolWeights) {
-            if (poolWeight.weight <= 0)
-                continue;
-            let qualityMin = 0;
-            let qualityMax = 1;
-            let n = compTotalWeight;
-            if (poolWeight.idx >= 3 && poolWeight.idx <= 5)
-                n -= 5;
-            if (n > 34) {
-                qualityMin = 4;
-                qualityMax = 4;
+        // Legacy-Algorithmus als Closure beibehalten
+        const legacyCalc = () => {
+            // Seed vorbereiten (Legacy)
+            let rngSeed = 0x77777770;
+            if (seed !== undefined) {
+                if (typeof seed === 'string') {
+                    rngSeed = this.stringToSeed(seed);
+                }
+                else {
+                    rngSeed = seed >>> 0;
+                }
             }
-            else if (n > 30) {
-                qualityMin = 3;
-                qualityMax = 4;
+            let rng = new Rng_1.Rng(rngSeed, [0, 0, 0]);
+            // Komponenten sortieren (Legacy-Verhalten)
+            let comps = _.orderBy(components, e => e);
+            // JS-Rundungsfixe
+            let hardcoded = BagOfCrafting.JsIncorrectRecipes.get(comps.toString());
+            if (hardcoded != null)
+                return hardcoded;
+            // Gewichte vorbereiten
+            let compTotalWeight = 0;
+            let compCounts = new Array(BagOfCrafting.ComponentShifts.length).fill(0);
+            for (let compId of comps) {
+                ++compCounts[compId];
+                compTotalWeight += BagOfCrafting.ComponentWeights[compId];
+                // RNG-Shift pro Komponente
+                rng.shift = BagOfCrafting.ComponentShifts[compId];
+                rng.next();
             }
-            else if (n > 26) {
-                qualityMin = 2;
-                qualityMax = 4;
-            }
-            else if (n > 22) {
-                qualityMin = 1;
-                qualityMax = 4;
-            }
-            else if (n > 18) {
-                qualityMin = 1;
-                qualityMax = 3;
-            }
-            else if (n > 14) {
-                qualityMin = 1;
-                qualityMax = 2;
-            }
-            else if (n > 8) {
-                qualityMin = 0;
-                qualityMax = 2;
-            }
-            let pool = this.pools[poolWeight.idx];
-            for (let item of pool.items) {
-                var quality = this.itemQualities.get(item.id);
-                if (quality < qualityMin)
+            rng.shift = BagOfCrafting.ComponentShifts[6];
+            // Pool-Gewichte (Legacy)
+            let poolWeights = [
+                { idx: 0, weight: 1 },
+                { idx: 1, weight: 2 },
+                { idx: 2, weight: 2 },
+                { idx: 4, weight: compCounts[4] * 10 },
+                { idx: 3, weight: compCounts[3] * 10 },
+                { idx: 5, weight: compCounts[6] * 5 },
+                { idx: 8, weight: compCounts[5] * 10 },
+                { idx: 12, weight: compCounts[7] * 10 },
+                { idx: 9, weight: compCounts[25] * 10 },
+            ];
+            if (compCounts[8] + compCounts[1] + compCounts[12] + compCounts[15] === 0)
+                poolWeights.push({ idx: 26, weight: compCounts[23] * 10 });
+            let totalWeight = 0;
+            let itemWeights = new Array(this.maxItemId + 1).fill(0);
+            for (let poolWeight of poolWeights) {
+                if (poolWeight.weight <= 0)
                     continue;
-                if (quality > qualityMax)
-                    continue;
-                var w = Math.fround(item.weight * poolWeight.weight);
-                itemWeights[item.id] = Math.fround(itemWeights[item.id] + w);
-                totalWeight = Math.fround(totalWeight + w);
+                let qualityMin = 0;
+                let qualityMax = 1;
+                let n = compTotalWeight;
+                if (poolWeight.idx >= 3 && poolWeight.idx <= 5)
+                    n -= 5;
+                if (n > 34) {
+                    qualityMin = 4;
+                    qualityMax = 4;
+                }
+                else if (n > 30) {
+                    qualityMin = 3;
+                    qualityMax = 4;
+                }
+                else if (n > 26) {
+                    qualityMin = 2;
+                    qualityMax = 4;
+                }
+                else if (n > 22) {
+                    qualityMin = 1;
+                    qualityMax = 4;
+                }
+                else if (n > 18) {
+                    qualityMin = 1;
+                    qualityMax = 3;
+                }
+                else if (n > 14) {
+                    qualityMin = 1;
+                    qualityMax = 2;
+                }
+                else if (n > 8) {
+                    qualityMin = 0;
+                    qualityMax = 2;
+                }
+                let pool = this.pools[poolWeight.idx];
+                for (let item of pool.items) {
+                    const quality = this.itemQualities.get(item.id);
+                    if (quality < qualityMin)
+                        continue;
+                    if (quality > qualityMax)
+                        continue;
+                    const w = Math.fround(item.weight * poolWeight.weight);
+                    itemWeights[item.id] = Math.fround(itemWeights[item.id] + w);
+                    totalWeight = Math.fround(totalWeight + w);
+                }
             }
-        }
-        if (totalWeight <= 0)
+            if (totalWeight <= 0)
+                return 25;
+            let target = Math.fround(rng.nextFloat() * totalWeight);
+            for (let i = 0; i < itemWeights.length; i++) {
+                if (target < itemWeights[i])
+                    return i;
+                target = Math.fround(target - itemWeights[i]);
+            }
             return 25;
-        let target = Math.fround(rng.nextFloat() * totalWeight);
-        for (let i = 0; i < itemWeights.length; i++) {
-            if (target < itemWeights[i])
-                return i;
-            target = Math.fround(target - itemWeights[i]);
-        }
-        return 25;
+        };
+        // Erst echte platinumgod-Logik, sonst Legacy-Fallback
+        return computeCraftResult(components, seed, legacyCalc);
     }
 }
 exports.BagOfCrafting = BagOfCrafting;
@@ -236,7 +267,7 @@ BagOfCrafting.ComponentWeights = [
     0x00000002
 ];
 /**
- * These are recipes that JS gets wrong due to rounding differences between single and double floating precision.
+ * Diese Rezepte korrigieren JS-Rundungsabweichungen (Legacy).
  */
 BagOfCrafting.JsIncorrectRecipes = new Map([
     [([1, 2, 3, 6, 13, 18, 24, 24]).toString(), 161],
