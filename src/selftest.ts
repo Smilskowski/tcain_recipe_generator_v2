@@ -9,4 +9,4 @@ function test(seedStr: string, comps: number[]) {
   console.log('Result Item ID:', res);
 }
 
-test('2LP2D89M', [0,1,5,8,20,0,0,0]); // Erwartung: 609 (Eternal D6)
+test('2LP2D89M', [0,1,5,8,20,0,0,0]); // Erwartung: 609
