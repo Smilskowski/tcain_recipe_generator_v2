@@ -16,6 +16,7 @@
     "build": "xcopy /E /I /Y /d assets dist\\assets && tsc -p .",
     "start": "node dist/index.js",
      "postinstall": "node scripts/fetch-pg.js",
-    "update:pg": "node scripts/fetch-pg.js"
+    "update:pg": "node scripts/fetch-pg.js",
+    "selftest": "tsc -p . && node dist/selftest.js"
   }
 }
