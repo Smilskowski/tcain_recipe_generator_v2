@@ -52,5 +52,5 @@ export class BagOfCrafting {
   // Wenn seed undefined oder Zahl
   return get_result(components, rngSeed);
 }
-
+}
 export default BagOfCrafting;
